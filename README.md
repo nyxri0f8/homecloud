@@ -205,3 +205,7 @@ Configuration is through environment variables: `HS_DIR` (app data, default `/op
 - Uploads are a single request each and aren't resumable; a dropped connection means that file starts over.
 - Folders can't be downloaded as a zip yet.
 - Sessions are kept in memory, so restarting the app logs everyone out.
+
+## License
+
+[MIT](LICENSE)
