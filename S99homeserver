@@ -1,0 +1,54 @@
+#!/bin/sh
+# Home server: mount the storage card, start Home Cloud and Tailscale
+
+HS=/opt/homeserver
+MNT=/mnt/storage
+LABEL=SERVER
+LOG=$HS/boot.log
+
+mount_card() {
+	mountpoint -q $MNT && return 0
+	mkdir -p $MNT
+	# card reader can take a few seconds to appear after boot
+	for i in $(seq 1 30); do
+		DEV=$(blkid | grep "LABEL=\"$LABEL\"" | cut -d: -f1)
+		[ -n "$DEV" ] && break
+		sleep 1
+	done
+	[ -z "$DEV" ] && { echo "$(date) storage card '$LABEL' not found" >>$LOG; return 1; }
+	# repair after a power cut, if needed
+	e2fsck -p $DEV >>$LOG 2>&1
+	mount -t ext4 -o noatime $DEV $MNT
+}
+
+start() {
+	# never start the file server without the card, or uploads would land on the internal flash
+	if mount_card; then
+		python3 $HS/app.py --init >>$LOG 2>&1
+		if ! pgrep -f "$HS/app.py" >/dev/null; then
+			nohup python3 $HS/app.py >>$HS/app.out 2>&1 &
+		fi
+	fi
+
+	if ! pidof tailscaled >/dev/null; then
+		mkdir -p /var/run/tailscale $HS/tailscale-state
+		nohup $HS/tailscaled --tun=userspace-networking \
+			--statedir=$HS/tailscale-state \
+			--socket=/var/run/tailscale/tailscaled.sock >>$HS/tailscaled.log 2>&1 &
+	fi
+}
+
+stop() {
+	pkill -f "$HS/app.py"
+	killall tailscaled 2>/dev/null
+	sleep 3
+	sync
+	mountpoint -q $MNT && umount $MNT
+}
+
+case "$1" in
+	start) start ;;
+	stop) stop ;;
+	restart) stop; start ;;
+	*) echo "Usage: $0 {start|stop|restart}"; exit 1 ;;
+esac
